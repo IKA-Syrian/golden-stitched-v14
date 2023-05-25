@@ -57,7 +57,7 @@ module.exports = (client) => {
             }else{
                 fileID = link.split('/')[5].split('?')[0]
             }
-            const pinteraction = await interaction.deferReply("يرجى الإنتظار حتى يتم إرسال الشهادة");
+            const pinteraction = await interaction.deferReply({ content: 'Processing...', fetchReply: true });
             let folderName
             let folderName1
             const folderInfo = execSync(`gdrive info ${fileID}`)
