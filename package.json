@@ -1,0 +1,32 @@
+{
+  "name": "golden-stitched-v14",
+  "version": "1.0.0",
+  "description": "Golden Stitching Bot V14",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ibrahimkingtk/golden-stitched-v14.git"
+  },
+  "author": "I.K.A Syrian#6416",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ibrahimkingtk/golden-stitched-v14/issues"
+  },
+  "homepage": "https://github.com/ibrahimkingtk/golden-stitched-v14#readme",
+  "dependencies": {
+    "@discordjs/builders": "^1.6.3",
+    "ascii-table": "^0.0.9",
+    "child_process": "^1.0.2",
+    "discord.js": "^14.11.0",
+    "dot-env": "^0.0.1",
+    "dotenv": "^16.0.3",
+    "glob": "^10.2.6",
+    "node-fetch": "^2.6.11",
+    "path": "^0.12.7"
+  }
+}
