@@ -14,8 +14,6 @@ async function executeCommand(commands, currentCommand, pinteraction, interactio
     if(options){
         option = options;
     }
-    // console.log(interaction);
-    // console.log(pinteraction.user);
     exec(command, option, async (error, stdout, stderr) => {
         if (error) {
             console.error(`exec error: ${error}`);
@@ -75,12 +73,12 @@ module.exports = (client) => {
             let outputPAth
             let StitchPath
             if(folderName1.includes(" ")){
-                outputPAth = `/root/golden-stitched-v14/downloads/${userID}/${folderName.replace(/ /g, "_")}/"${folderName1}"/"${folderName1}_Stitched"/`
+                outputPAth = path.join(__dirname, `./downloads/${userID}/${folderName.replace(/ /g, "_")}/"${folderName1}"/"${folderName1}_Stitched"/`)
                 console.log(outputPAth)
-                StitchPath = `/root/golden-stitched-v14/downloads/${userID}/${folderName.replace(/ /g, "_")}/"${folderName1}"`
+                StitchPath = path.join(__dirname, `./downloads/${userID}/${folderName.replace(/ /g, "_")}/"${folderName1}"`)
             }else{
-                outputPAth = `/root/golden-stitched-v14/downloads/${userID}/${folderName}/${folderName1}/${folderName1}_Stitched`
-                StitchPath = `/root/golden-stitched-v14/downloads/${userID}/${folderName}/${folderName1}`
+                outputPAth = path.join(__dirname, `./downloads/${userID}/${folderName}/${folderName1}/${folderName1}_Stitched`)
+                StitchPath = path.join(__dirname, `./downloads/${userID}/${folderName}/${folderName1}`)
             }
             const Dwnloadpath = path.join(__dirname, `./downloads/${userID}/${folderName.replace(/ /g, "_")}`)
             
@@ -111,7 +109,6 @@ module.exports = (client) => {
                 commands = [
                     { 
                         command: `gdrive download ${fileID} --force --recursive --path ${Dwnloadpath} --skip`, 
-                        // status: 'All done!' 
                     },
                     {
                         command: `SmartStitch -i ${StitchPath} -sh ${height} -t .${format} -cw ${width}`
