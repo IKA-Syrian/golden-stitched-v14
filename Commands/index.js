@@ -1,5 +1,5 @@
 const Stitch = require('./stitch')
 
-module.exports = {
-    Stitch,
-};
+module.exports = [
+    Stitch
+];
