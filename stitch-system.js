@@ -64,6 +64,11 @@ module.exports = (client) => {
             }
             const Dwnloadpath = path.join(__dirname, `./downloads/${userID}/${folderName.replace(/ /g, "_")}`)
 
+            // Ensure download directory exists
+            if (!fs.existsSync(Dwnloadpath)) {
+                fs.mkdirSync(Dwnloadpath, { recursive: true });
+            }
+
             // Construct SmartStitch command based on processing options
             let stitchCmd = `SmartStitch -i ${StitchPath} -sh ${height} -t .${format}`;
             if (width != null) {
