@@ -68,45 +68,82 @@ module.exports = (client) => {
                 fs.mkdirSync(Dwnloadpath, { recursive: true });
             }
 
-            // Construct SmartStitch command based on processing options with QUOTED path
-            let stitchCmd = `SmartStitch -i "${StitchPath}" -sh ${height} -t .${format}`;
-            if (width != null) {
-                stitchCmd += ` -cw ${width}`;
-            }
-
-            // Define workflow steps
-            const workflow = [
-                {
-                    name: 'Download',
-                    // Quote destination path
-                    command: `gdrive files download ${fileID} --overwrite --recursive --destination "${Dwnloadpath}"`,
-                },
-                {
-                    name: 'Stitch',
-                    command: stitchCmd
-                },
-                {
-                    name: 'Zip',
-                    command: `zip -r chapter-${folderName1.replace(/ /g, "_")}.zip *`,
-                    options: {
-                        cwd: outputPAth
-                    }
-                },
-                {
-                    name: 'Upload',
-                    // Quote source path
-                    command: `rclone copy "${outputPAth}" krGolden:/stitched_BOT/${folderName1.replace(/ /g, "_")}_Stitched`,
-                },
-                {
-                    name: 'Link',
-                    command: `rclone link krGolden:/stitched_BOT/${folderName1.replace(/ /g, "_")}_Stitched`,
-                    isResult: true
-                }
-            ];
-
             try {
-                // Execute commands sequentially
-                for (const step of workflow) {
+                // Step 1: Download
+                console.log(`[Download] Downloading to: ${Dwnloadpath}`);
+                await execPromise(`gdrive files download ${fileID} --overwrite --recursive --destination "${Dwnloadpath}"`);
+
+                // Step 2: Unzip/Prepare
+                console.log(`[Prepare] Checking for compressed files...`);
+                const getAllFiles = (dir) => {
+                    let results = [];
+                    const list = fs.readdirSync(dir);
+                    list.forEach(file => {
+                        file = path.join(dir, file);
+                        const stat = fs.statSync(file);
+                        if (stat && stat.isDirectory()) results = results.concat(getAllFiles(file));
+                        else if (file.endsWith('.zip')) results.push(file);
+                    });
+                    return results;
+                }
+
+                const zips = getAllFiles(Dwnloadpath);
+                if (zips.length > 0) {
+                    console.log(`[Prepare] Found ${zips.length} zip files. Extracting...`);
+                    for (const zip of zips) {
+                        try {
+                            const dest = path.dirname(zip);
+                            // Unzip and delete the zip file
+                            await execPromise(`unzip -o "${zip}" -d "${dest}"`);
+                            fs.unlinkSync(zip); 
+                        } catch (e) { 
+                            console.error(`[Prepare] Failed to unzip ${zip}`, e); 
+                        }
+                    }
+                    
+                    // If proper StitchPath is gone (e.g. it was the zip file), update it to Dwnloadpath
+                    if (!fs.existsSync(StitchPath)) {
+                        console.log(`[Prepare] StitchPath missing after unzip (was likely the zip file). Updating to: ${Dwnloadpath}`);
+                        StitchPath = Dwnloadpath;
+                    }
+                }
+
+                // If StitchPath is a file (e.g. downloaded a single file not zip), use its directory
+                if (fs.existsSync(StitchPath) && fs.lstatSync(StitchPath).isFile()) {
+                     StitchPath = path.dirname(StitchPath);
+                }
+
+                // Construct processing steps dynamically with possibly updated StitchPath
+                let stitchCmd = `SmartStitch -i "${StitchPath}" -sh ${height} -t .${format}`;
+                if (width != null) {
+                    stitchCmd += ` -cw ${width}`;
+                }
+
+                const processWorkflow = [
+                    {
+                        name: 'Stitch',
+                        command: stitchCmd
+                    },
+                    {
+                        name: 'Zip',
+                        command: `zip -r chapter-${folderName1.replace(/ /g, "_")}.zip *`,
+                        options: {
+                            cwd: outputPAth
+                        }
+                    },
+                    {
+                        name: 'Upload',
+                        command: `rclone copy "${outputPAth}" Golden1:/stitched_BOT/${folderName1.replace(/ /g, "_")}_Stitched`,
+                    },
+                    {
+                        name: 'Link',
+                        command: `rclone link Golden1:/stitched_BOT/${folderName1.replace(/ /g, "_")}_Stitched`,
+                        isResult: true
+                    }
+                ];
+
+                // Execute processing commands
+                for (const step of processWorkflow) {
                     console.log(`[${step.name}] Executing: ${step.command}`);
 
                     const { stdout, stderr } = await execPromise(step.command, step.options || {});
