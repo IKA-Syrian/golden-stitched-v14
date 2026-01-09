@@ -53,24 +53,23 @@ module.exports = (client) => {
 
             let outputPAth
             let StitchPath
-            // Setup paths
-            if (folderName1.includes(" ")) {
-                outputPAth = path.join(__dirname, `./downloads/${userID}/${folderName.replace(/ /g, "_")}/"${folderName1}"/"${folderName1}_Stitched"/`)
-                console.log(outputPAth)
-                StitchPath = path.join(__dirname, `./downloads/${userID}/${folderName.replace(/ /g, "_")}/"${folderName1}"`)
-            } else {
-                outputPAth = path.join(__dirname, `./downloads/${userID}/${folderName}/${folderName1}/${folderName1}_Stitched`)
-                StitchPath = path.join(__dirname, `./downloads/${userID}/${folderName}/${folderName1}`)
-            }
-            const Dwnloadpath = path.join(__dirname, `./downloads/${userID}/${folderName.replace(/ /g, "_")}`)
+
+            // Setup paths - consistently use underscores for the parent folder to match Dwnloadpath
+            // Use raw paths for fs/cwd (no quotes), quote only in shell commands
+            const parentFolderPath = folderName.replace(/ /g, "_");
+
+            outputPAth = path.join(__dirname, 'downloads', userID, parentFolderPath, folderName1, `${folderName1}_Stitched`);
+            StitchPath = path.join(__dirname, 'downloads', userID, parentFolderPath, folderName1);
+
+            const Dwnloadpath = path.join(__dirname, 'downloads', userID, parentFolderPath);
 
             // Ensure download directory exists
             if (!fs.existsSync(Dwnloadpath)) {
                 fs.mkdirSync(Dwnloadpath, { recursive: true });
             }
 
-            // Construct SmartStitch command based on processing options
-            let stitchCmd = `SmartStitch -i ${StitchPath} -sh ${height} -t .${format}`;
+            // Construct SmartStitch command based on processing options with QUOTED path
+            let stitchCmd = `SmartStitch -i "${StitchPath}" -sh ${height} -t .${format}`;
             if (width != null) {
                 stitchCmd += ` -cw ${width}`;
             }
@@ -79,7 +78,8 @@ module.exports = (client) => {
             const workflow = [
                 {
                     name: 'Download',
-                    command: `gdrive files download ${fileID} --overwrite --recursive --destination ${Dwnloadpath}`,
+                    // Quote destination path
+                    command: `gdrive files download ${fileID} --overwrite --recursive --destination "${Dwnloadpath}"`,
                 },
                 {
                     name: 'Stitch',
@@ -94,11 +94,12 @@ module.exports = (client) => {
                 },
                 {
                     name: 'Upload',
-                    command: `rclone copy ${outputPAth} Golden1:/stitched_BOT/${folderName1.replace(/ /g, "_")}_Stitched`,
+                    // Quote source path
+                    command: `rclone copy "${outputPAth}" krGolden:/stitched_BOT/${folderName1.replace(/ /g, "_")}_Stitched`,
                 },
                 {
                     name: 'Link',
-                    command: `rclone link Golden1:/stitched_BOT/${folderName1.replace(/ /g, "_")}_Stitched`,
+                    command: `rclone link krGolden:/stitched_BOT/${folderName1.replace(/ /g, "_")}_Stitched`,
                     isResult: true
                 }
             ];
