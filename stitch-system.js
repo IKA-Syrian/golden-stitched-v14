@@ -74,7 +74,7 @@ module.exports = (client) => {
             const workflow = [
                 {
                     name: 'Download',
-                    command: `gdrive files download ${fileID} --force --recursive --path ${Dwnloadpath} --skip`,
+                    command: `gdrive files download ${fileID} --overwrite --recursive --path ${Dwnloadpath} --skip`,
                 },
                 {
                     name: 'Stitch',
