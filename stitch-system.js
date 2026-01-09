@@ -48,7 +48,7 @@ module.exports = (client) => {
                 }
             } catch (err) {
                 console.error("Error fetching gdrive info:", err);
-                return interaction.followUp({ content: "Error fetching folder info", ephemeral: true });
+                return interaction.followUp({ content: "❌ Error fetching folder info. Please check the link and try again.", ephemeral: true });
             }
 
             let outputPAth
@@ -74,7 +74,7 @@ module.exports = (client) => {
             const workflow = [
                 {
                     name: 'Download',
-                    command: `gdrive files download ${fileID} --overwrite --recursive --path ${Dwnloadpath} --skip`,
+                    command: `gdrive files download ${fileID} --overwrite --recursive --destination ${Dwnloadpath}`,
                 },
                 {
                     name: 'Stitch',
@@ -123,7 +123,7 @@ module.exports = (client) => {
                 }
             } catch (err) {
                 console.error("Workflow failed:", err);
-                await interaction.followUp({ content: `An error occurred: ${err.message}`, ephemeral: true });
+                await interaction.followUp({ content: `❌ An error occurred during the process. Please check the logs.`, ephemeral: true });
             } finally {
                 // Cleanup downloaded files
                 try {
