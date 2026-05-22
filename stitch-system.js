@@ -18,6 +18,7 @@ module.exports = (client) => {
             const height = interaction.options.getInteger('height')
             const format = interaction.options.getString('format')
             const width = interaction.options.getInteger('width')
+            const smart = interaction.options.getBoolean('smart')
 
             let fileID
             if (link.split('?id=').length == 2) {
@@ -113,10 +114,28 @@ module.exports = (client) => {
                      StitchPath = path.dirname(StitchPath);
                 }
 
-                // Construct processing steps dynamically with possibly updated StitchPath
-                let stitchCmd = `SmartStitch -i "${StitchPath}" -sh ${height} -t .${format}`;
-                if (width != null) {
-                    stitchCmd += ` -cw ${width}`;
+                // Construct the stitch command. Smart mode runs our overlap-aware
+                // Python stitcher, which writes pages straight into outputPAth (the
+                // same folder the zip/upload steps below already use). Non-smart mode
+                // keeps the original SmartStitch behavior, unchanged.
+                let stitchCmd;
+                if (smart) {
+                    // Start from a clean output folder so a retry can't mix in stale
+                    // pages, then (re)create it for smart_stitch.py to write into.
+                    fs.rmSync(outputPAth, { recursive: true, force: true });
+                    fs.mkdirSync(outputPAth, { recursive: true });
+                    // Cross-platform Python launcher; override with PYTHON_BIN if needed.
+                    const pythonBin = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'py -3' : 'python3');
+                    const script = path.join(__dirname, 'smart_stitch.py');
+                    stitchCmd = `${pythonBin} "${script}" -i "${StitchPath}" -o "${outputPAth}" -sh ${height} -t ${format}`;
+                    if (width != null) {
+                        stitchCmd += ` -cw ${width}`;
+                    }
+                } else {
+                    stitchCmd = `SmartStitch -i "${StitchPath}" -sh ${height} -t .${format}`;
+                    if (width != null) {
+                        stitchCmd += ` -cw ${width}`;
+                    }
                 }
 
                 const processWorkflow = [

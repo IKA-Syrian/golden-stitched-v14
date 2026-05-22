@@ -1,0 +1,5 @@
+# Python deps for smart_stitch.py (the /stitch smart:true path).
+# Install with:  py -3 -m pip install -r requirements.txt   (Windows)
+#           or:  python3 -m pip install -r requirements.txt  (Linux/macOS)
+numpy>=1.23
+Pillow>=9.1

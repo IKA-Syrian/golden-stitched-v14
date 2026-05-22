@@ -8,5 +8,6 @@ const naverStitch = new SlashCommandBuilder()
     .addIntegerOption(option => option.setName('height').setDescription('The height of the image').setRequired(true))
     .addStringOption(option => option.setName('format').setDescription('The format of the image').setRequired(true))
     .addIntegerOption(option => option.setName('width').setDescription('The width of the image').setRequired(false))
+    .addBooleanOption(option => option.setName('smart').setDescription('Smart overlap-aware stitching: removes duplicated bands between overlapping screenshots').setRequired(false))
 
 module.exports = naverStitch.toJSON()

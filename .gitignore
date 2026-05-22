@@ -130,3 +130,18 @@ dist
 #Addisational files
 stitch-link.js
 naver-stitch.js
+
+# Bot runtime working dir (downloaded + stitched chapters)
+downloads/
+
+# Python (smart_stitch.py)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local diagnostic scratch
+_t_*/
+_test_*/
+_compare.*
+_contact.*
