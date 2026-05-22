@@ -96,12 +96,12 @@ module.exports = (client) => {
                             const dest = path.dirname(zip);
                             // Unzip and delete the zip file
                             await execPromise(`unzip -o "${zip}" -d "${dest}"`);
-                            fs.unlinkSync(zip); 
-                        } catch (e) { 
-                            console.error(`[Prepare] Failed to unzip ${zip}`, e); 
+                            fs.unlinkSync(zip);
+                        } catch (e) {
+                            console.error(`[Prepare] Failed to unzip ${zip}`, e);
                         }
                     }
-                    
+
                     // If proper StitchPath is gone (e.g. it was the zip file), update it to Dwnloadpath
                     if (!fs.existsSync(StitchPath)) {
                         console.log(`[Prepare] StitchPath missing after unzip (was likely the zip file). Updating to: ${Dwnloadpath}`);
@@ -111,7 +111,7 @@ module.exports = (client) => {
 
                 // If StitchPath is a file (e.g. downloaded a single file not zip), use its directory
                 if (fs.existsSync(StitchPath) && fs.lstatSync(StitchPath).isFile()) {
-                     StitchPath = path.dirname(StitchPath);
+                    StitchPath = path.dirname(StitchPath);
                 }
 
                 // Construct the stitch command. Smart mode runs our overlap-aware
@@ -152,11 +152,11 @@ module.exports = (client) => {
                     },
                     {
                         name: 'Upload',
-                        command: `rclone copy "${outputPAth}" Golden1:/stitched_BOT/${folderName1.replace(/ /g, "_")}_Stitched`,
+                        command: `rclone copy "${outputPAth}" krGolden:/stitched_BOT/${folderName1.replace(/ /g, "_")}_Stitched`,
                     },
                     {
                         name: 'Link',
-                        command: `rclone link Golden1:/stitched_BOT/${folderName1.replace(/ /g, "_")}_Stitched`,
+                        command: `rclone link krGolden:/stitched_BOT/${folderName1.replace(/ /g, "_")}_Stitched`,
                         isResult: true
                     }
                 ];
