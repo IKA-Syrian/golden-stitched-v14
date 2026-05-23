@@ -33,15 +33,40 @@ The bot picks the Python launcher automatically (`py -3` on Windows, `python3`
 elsewhere). Override it if needed with the `PYTHON_BIN` environment variable, e.g.
 `PYTHON_BIN="python"` or a full path to a venv interpreter.
 
+On Linux servers with an externally-managed Python (you'll see
+`error: externally-managed-environment`), install into a virtualenv and point the
+bot at it:
+
+```
+python3 -m venv .venv         # or: uv venv
+.venv/bin/python -m pip install -r requirements.txt   # or: uv pip install -r requirements.txt
+echo 'PYTHON_BIN=/full/path/to/.venv/bin/python' >> .env
+pm2 restart all --update-env
+```
+
 ### How it works
 
 1. Load images (natural sort) and normalize them to a common width.
-2. For each consecutive pair, detect the vertical overlap and trim the duplicate.
-   A detected overlap is only trimmed if it passes three gates: the bands are
-   near-identical (pixel MAD), the band has real content (std-dev floor), and the
-   match is unique (not one of many equally-good flat alignments).
-3. Concatenate into one strip and slice into ~`height` pages, cutting on blank
+2. For each consecutive pair, find the vertical overlap and trim that duplicate
+   band. A real scroll-overlap matches pixel-for-pixel (MAD ≈ 0), so the detector
+   picks the **largest overlap among the *tightest* matches** (within
+   `--tight-margin` of the best MAD). This is the crucial bit: a slightly larger
+   but *looser* alignment (similar-looking but not identical) must NOT win, or it
+   trims across and deletes real content. A fast row-signature shortlist proposes
+   candidates, confirmed on real pixels. If nothing matches, the images are
+   butt-joined — so normal chapters (distinct panels) are safe too. A flat/white
+   band (e.g. a shared speech bubble) is fine: if the pixels match, it's trimmed.
+3. Feather each seam (a short cross-fade, `--feather` rows). In animated or
+   gradient regions (sparkle/bokeh transitions) consecutive screenshots aren't
+   pixel-identical, so a hard cut would leave a faint horizontal tonal step in
+   the smooth area; the cross-fade spreads it out so it's invisible. For a
+   perfectly-identical overlap this is a no-op.
+4. Concatenate into one strip and slice into ~`height` pages, cutting on blank
    rows (SmartStitch-style) so panels and speech bubbles aren't split.
 
-Tuning knobs (slicing sensitivity, and the overlap MAD / variance / uniqueness
-thresholds) are CLI flags on `smart_stitch.py` — run `py -3 smart_stitch.py -h`.
+Tuning knobs are CLI flags on `smart_stitch.py` (run `py -3 smart_stitch.py -h`):
+- `--tight-margin` (default 1.0) — how far above the best (lowest) overlap MAD
+  still counts as a match. Smaller = more conservative (never deletes content,
+  may leave a tiny repeat); larger = trims more aggressively.
+- `--mad-accept` — an overlap is rejected outright if its MAD exceeds this.
+- `--feather` — seam cross-fade height (`0` disables it).

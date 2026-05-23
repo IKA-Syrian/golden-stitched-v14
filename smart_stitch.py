@@ -85,42 +85,73 @@ def collect_images(input_dir):
 # Overlap detection
 # --------------------------------------------------------------------------- #
 class OverlapParams:
-    """Tunable knobs for the detector. Defaults suit clean PNG screenshots."""
+    """Tunable knobs for the detector. Defaults suit clean PNG/JPEG screenshots."""
     def __init__(self, args):
-        self.min_overlap = 8                    # ignore matches smaller than this (px)
-        self.max_overlap_frac = 0.92            # never trim more than this fraction
-        self.ignore_side = args.ignore_side     # cols skipped left & right
-        self.mad_accept = args.mad_accept       # GATE 1: max pixel diff to call it a match
-        self.var_floor = args.var_floor         # GATE 3: min std-dev (reject blank-on-blank)
-        self.uniqueness_min = args.uniqueness   # GATE 2: best must beat baseline by this ratio
-        self.coarse_scale = 2                   # row-signature downscale for the coarse search
+        self.min_overlap = 8                     # ignore matches smaller than this (px)
+        self.max_overlap_frac = 0.92             # never trim more than this fraction
+        self.ignore_side = args.ignore_side      # cols skipped left & right
+        self.mad_accept = args.mad_accept        # an overlap is invalid if pixel MAD > this
+        self.tight_margin = args.tight_margin    # how far above the best MAD still counts as "tight"
+        self.coarse_accept = args.coarse_accept  # row-signature score to shortlist candidates
+        self.coarse_tight = 5.0                  # keep candidates within this of the best coarse score
+        self.coarse_scale = 2                    # row-signature downscale for the coarse search
+        self.max_checks = 120                    # cap candidate pixel-checks per pair
 
 
-def _row_signature(gray, ignore_side):
-    """Per-row mean intensity over the interior columns (cheap 1-D fingerprint)."""
+def _row_signature(gray, ignore_side, buckets=16):
+    """Per-row fingerprint: each row reduced to `buckets` column-averages.
+
+    A single per-row mean is too weak -- many unrelated rows share a brightness,
+    so misaligned offsets score deceptively low and crowd out the true overlap.
+    Splitting each row into a few horizontal buckets stays cheap but captures
+    enough structure that essentially only the correct alignment scores low.
+    """
     interior = gray[:, ignore_side: gray.shape[1] - ignore_side] if ignore_side else gray
-    return interior.mean(axis=1)
+    w = interior.shape[1]
+    if w < buckets * 2:
+        return interior.mean(axis=1, keepdims=True)
+    edges = np.linspace(0, w, buckets + 1).astype(int)
+    sig = np.empty((interior.shape[0], buckets), dtype=np.float32)
+    for b in range(buckets):
+        sig[:, b] = interior[:, edges[b]:edges[b + 1]].mean(axis=1)
+    return sig
 
 
-def _local_minima(scores):
-    """Indices of strict-ish local minima in a 1-D score array."""
-    mins = []
-    for i in range(1, len(scores) - 1):
-        if scores[i] <= scores[i - 1] and scores[i] < scores[i + 1]:
-            mins.append(i)
-    if not mins:                       # fall back to the global minimum
-        mins = [int(np.argmin(scores))]
-    return mins
+def _refine(up, lo, side, ov0, s, max_ov, min_ov, cs=2):
+    """Coarse downsampling can place the overlap a few rows off (a 1px error is
+    enough to inflate the pixel MAD). Search the full-resolution rows around
+    `ov0` for the exact overlap with the lowest pixel MAD; return (rows, mad).
+    Columns are subsampled by `cs` for speed (does not affect the chosen row)."""
+    hu, wu = up.shape
+    best_ov, best_mad = ov0, np.inf
+    for ov in range(max(min_ov, ov0 - s), min(max_ov, ov0 + s) + 1):
+        bu = up[hu - ov:, side: wu - side: cs]
+        bl = lo[:ov, side: wu - side: cs]
+        n = min(bu.shape[0], bl.shape[0])
+        if n < min_ov:
+            continue
+        m = float(np.mean(np.abs(bu[bu.shape[0] - n:] - bl[:n])))
+        if m < best_mad:
+            best_mad, best_ov = m, n
+    return best_ov, best_mad
 
 
-def detect_overlap(upper_gray, lower_gray, p, decide):
-    """How many rows at the TOP of `lower_gray` duplicate the BOTTOM of `upper_gray`.
+def detect_overlap(upper_gray, lower_gray, p):
+    """How many rows at the TOP of `lower_gray` duplicate the BOTTOM of
+    `upper_gray`. Returns the overlap in pixels, or 0 for "no confident overlap".
 
-    Returns the overlap in pixels, or 0 for "no confident overlap -> butt-join".
+    A real scroll-overlap matches pixel-for-pixel (MAD ~ 0) at exactly one offset.
+    The key is to pick the LARGEST overlap among the TIGHTEST matches -- not the
+    largest match under a loose ceiling. A slightly larger, looser alignment
+    (MAD a few) is a partial coincidence; trimming to it deletes real content and
+    misaligns the seam, so it must lose to the exact (MAD ~ 0) overlap.
 
-    Two-stage for speed + robustness:
-      coarse) slide cheap per-row signatures to PROPOSE candidate offsets;
-      verify) score each candidate on real pixels and run the accept/reject gates.
+      1. Score every candidate overlap with cheap per-row signatures.
+      2. Keep candidates whose signature is near the BEST (drops looser/larger
+         partial matches before the costly pixel check).
+      3. Measure each on real pixels (refined to exact rows).
+      4. Return the LARGEST overlap whose pixel MAD is within `tight_margin` of
+         the minimum -- the largest *exact* overlap.
     """
     hu, wu = upper_gray.shape
     side = min(p.ignore_side, (wu // 2) - 1) if wu > 2 else 0
@@ -130,87 +161,66 @@ def detect_overlap(upper_gray, lower_gray, p, decide):
         return 0
 
     # ---- coarse search on downsampled row signatures -------------------------
-    sig_u = _row_signature(upper_gray, side)
-    sig_l = _row_signature(lower_gray, side)
     s = max(1, p.coarse_scale)
-    cu = sig_u[::s]
-    cl = sig_l[::s]
+    cu = _row_signature(upper_gray, side)[::s]
+    cl = _row_signature(lower_gray, side)[::s]
     cmax = int(min(len(cu), len(cl), max_ov // s + 1))
     if cmax <= p.min_overlap // s:
         return 0
 
     scores = np.full(cmax, np.inf, dtype=np.float64)
     for k in range(max(1, p.min_overlap // s), cmax):
-        a = cu[len(cu) - k:]          # bottom k signature rows of upper
-        b = cl[:k]                     # top k signature rows of lower
-        scores[k] = np.mean(np.abs(a - b))
+        scores[k] = np.mean(np.abs(cu[len(cu) - k:] - cl[:k]))
 
-    if not np.isfinite(scores).any():
+    cand = np.where(scores < p.coarse_accept)[0]
+    if cand.size == 0:
+        cand = np.argsort(scores)[:16]
+    s_min = float(scores[cand].min())
+    # Keep only candidates whose coarse signature is near the best; this drops
+    # the looser, larger partial matches before the (costly) pixel check.
+    pre = [int(k) for k in cand if scores[k] <= s_min + p.coarse_tight]
+    if len(pre) > p.max_checks:        # uniform/white valley: keep best-scoring + a few largest
+        pre = sorted(set(sorted(pre, key=lambda k: scores[k])[:p.max_checks - 6]
+                         + sorted(pre)[-6:]))
+    else:
+        pre = sorted(set(pre))
+
+    # ---- measure each kept candidate on real pixels (refined to exact rows) --
+    results = []
+    for k in pre:
+        ov0 = min(k * s, max_ov)
+        if ov0 < p.min_overlap:
+            continue
+        ov, mad = _refine(upper_gray, lower_gray, side, ov0, s, max_ov, p.min_overlap)
+        if decide_overlap(ov, mad, p):
+            results.append((ov, mad))
+    if not results:
         return 0
-    baseline = float(np.median(scores[np.isfinite(scores)]))
 
-    # ---- verify each candidate on real pixels, pick the best that passes -----
-    best_ov, best_mad = 0, None
-    for k in _local_minima(scores):
-        ov = min(k * s, max_ov)        # coarse index -> full-res row count
-        if ov < p.min_overlap:
-            continue
-        band_u = upper_gray[hu - ov:, side: wu - side]
-        band_l = lower_gray[:ov, side: wu - side]
-        n = min(band_u.shape[0], band_l.shape[0])
-        if n < p.min_overlap:
-            continue
-        band_u, band_l = band_u[band_u.shape[0] - n:], band_l[:n]
-
-        pixel_mad = float(np.mean(np.abs(band_u.astype(np.float32)
-                                         - band_l.astype(np.float32))))
-        band_std = float(band_l.std())
-        uniqueness = baseline / (scores[k] + 1e-6)
-
-        if decide(n, pixel_mad, band_std, uniqueness, p):
-            if best_mad is None or pixel_mad < best_mad:
-                best_ov, best_mad = n, pixel_mad
-    return best_ov
+    # ---- largest overlap among the tightest matches --------------------------
+    m_min = min(mad for _, mad in results)
+    return max(ov for ov, mad in results if mad <= m_min + p.tight_margin)
 
 
 # --------------------------------------------------------------------------- #
 # THE DECISION GATE  --  the heart of "smart"
 # --------------------------------------------------------------------------- #
-def decide_overlap(ov, pixel_mad, band_std, uniqueness, p):
-    """Decide whether a *candidate* overlap is a REAL shared band (trim it) or a
-    coincidence (return False -> butt-join).
+def decide_overlap(ov, pixel_mad, p):
+    """Accept a candidate overlap only if its real pixels line up.
 
-    This is the one place where judgment really matters, so it is isolated here
-    for easy tuning. Each gate defends against a specific failure mode:
+    `detect_overlap` already prefers the LARGEST candidate, so the only question
+    left is: are these two bands actually the SAME pixels? A true scroll-overlap
+    is near-identical (MAD ~0 for PNG, a few for re-compressed / resized JPEG); a
+    coincidental alignment scores far higher (tens). We deliberately do NOT reject
+    a band for being flat/white -- a speech bubble or blank gap shared by both
+    screenshots is a real overlap and must be trimmed -- so the pixel MAD is the
+    single gate. (An earlier version rejected low-variance bands, which wrongly
+    butt-joined real overlaps that contained speech bubbles, duplicating them.)
 
-      GATE 1 - pixel_mad <= p.mad_accept
-          Are the two bands actually the SAME pixels? A true scroll-overlap is
-          near-identical (MAD ~0 for PNG, a few for re-compressed JPEG). A
-          coincidental alignment scores far higher (tens). Tolerant of light
-          compression noise, strict enough to reject different content.
-
-      GATE 2 - uniqueness >= p.uniqueness_min
-          Is this match SPECIAL, or just one of many equally-good alignments?
-          (A long flat region matches at lots of offsets.) `uniqueness` is the
-          median candidate score divided by this candidate's score, so a sharp,
-          singular match scores high and an ambiguous one scores ~1.
-
-      GATE 3 - band_std >= p.var_floor
-          Does the band contain real CONTENT? A blank-on-blank "match" has MAD~0
-          but carries no evidence it's truly an overlap, so a flat band must be
-          rejected to avoid eating a legitimate blank gutter between panels.
-
-    Returns True to trim `ov` rows, False to butt-join.
+    Tune `--mad-accept` to taste: lower = stricter (never trims by mistake, but
+    may miss a heavily-recompressed overlap); higher = more tolerant.
     """
-    if ov < p.min_overlap:
-        return False
-    if pixel_mad > p.mad_accept:
-        return False
-    if band_std < p.var_floor:
-        return False
-    if uniqueness < p.uniqueness_min:
-        return False
-    return True
+    return ov >= p.min_overlap and pixel_mad <= p.mad_accept
 
 
 # --------------------------------------------------------------------------- #
@@ -285,9 +295,14 @@ def main():
     ap.add_argument("-ip", "--ignore-side", type=int, default=5)
     ap.add_argument("-lq", "--quality", type=int, default=100)
     # overlap knobs
-    ap.add_argument("--mad-accept", type=float, default=8.0)
-    ap.add_argument("--var-floor", type=float, default=3.0)
-    ap.add_argument("--uniqueness", type=float, default=1.5)
+    ap.add_argument("--mad-accept", type=float, default=10.0,
+                    help="an overlap is invalid if its pixel MAD exceeds this")
+    ap.add_argument("--tight-margin", type=float, default=1.0,
+                    help="how far above the best overlap MAD still counts as a match")
+    ap.add_argument("--coarse-accept", type=float, default=12.0,
+                    help="row-signature score used to shortlist overlap candidates")
+    ap.add_argument("--feather", type=int, default=40,
+                    help="rows to cross-fade at each seam to hide tonal steps (0 = off)")
     ap.add_argument("--no-overlap", action="store_true",
                     help="disable overlap removal (plain concat = SmartStitch-like)")
     args = ap.parse_args()
@@ -338,10 +353,22 @@ def main():
 
         ov = 0
         if prev_gray is not None and not args.no_overlap:
-            ov = detect_overlap(prev_gray, gray, p, decide_overlap)
+            ov = detect_overlap(prev_gray, gray, p)
         if ov:
             total_trimmed += ov
             overlaps.append((os.path.basename(path), ov))
+            # Feather the seam: cross-fade the previous image's tail into this
+            # image's matching overlap rows, so any residual tonal step (e.g.
+            # animated sparkle/gradient regions that aren't pixel-identical
+            # between screenshots) is spread over many rows instead of showing
+            # as a hard horizontal line. For a perfect overlap this is a no-op.
+            if args.feather and parts:
+                f = min(args.feather, ov, parts[-1].shape[0])
+                if f >= 4:
+                    a = np.linspace(0.0, 1.0, f, dtype=np.float32).reshape(f, 1, 1)
+                    tail = parts[-1][-f:].astype(np.float32)
+                    band = rgb[ov - f:ov].astype(np.float32)
+                    parts[-1][-f:] = ((1.0 - a) * tail + a * band).astype(np.uint8)
 
         parts.append(rgb[ov:].copy())
         prev_gray = gray          # full grayscale (one image's worth of memory)
